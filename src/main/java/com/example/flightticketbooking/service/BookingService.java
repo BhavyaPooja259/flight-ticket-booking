@@ -27,6 +27,11 @@ public class BookingService {
      * <p>The seat availability check and the decrement are performed atomically
      * by {@link Flight#reserveSeats(int)}, so concurrent requests for the same
      * flight can never take the flight past its capacity.
+     *
+     * <p>Reserving the seats and recording the booking are two separate steps,
+     * so if the second one fails the reserved seats are given back before the
+     * failure propagates. Without that, a failed save would leave seats
+     * deducted for a booking that does not exist, and they could never be sold.
      */
     public Booking book(BookingRequest request) {
         Flight flight = flightRepository.findByFlightNumber(request.flightNumber())
@@ -36,11 +41,16 @@ public class BookingService {
             throw new InsufficientSeatsException(request.flightNumber(), request.numberOfSeats());
         }
 
-        Booking booking = new Booking(
-                UUID.randomUUID().toString(),
-                flight.getFlightNumber(),
-                request.passengerName(),
-                request.numberOfSeats());
-        return bookingRepository.save(booking);
+        try {
+            Booking booking = new Booking(
+                    UUID.randomUUID().toString(),
+                    flight.getFlightNumber(),
+                    request.passengerName(),
+                    request.numberOfSeats());
+            return bookingRepository.save(booking);
+        } catch (RuntimeException bookingNotRecorded) {
+            flight.releaseSeats(request.numberOfSeats());
+            throw bookingNotRecorded;
+        }
     }
 }

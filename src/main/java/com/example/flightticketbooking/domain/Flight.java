@@ -35,6 +35,18 @@ public class Flight {
         return true;
     }
 
+    /**
+     * Atomically gives {@code numberOfSeats} back to the flight.
+     *
+     * <p>This is the compensating action for a reservation that could not be
+     * completed; it is only ever called with seats that {@link
+     * #reserveSeats(int)} has just taken, so it cannot push the flight above
+     * its capacity.
+     */
+    public synchronized void releaseSeats(int numberOfSeats) {
+        availableSeats += numberOfSeats;
+    }
+
     public String getFlightNumber() {
         return flightNumber;
     }

@@ -107,6 +107,13 @@ The service never reads availability and then writes it back, so there is no
 window for a lost update. The app is a single instance, so this in-process lock
 is sufficient — no distributed locking involved.
 
+**Failing after the reservation.** Reserving seats and recording the booking
+are two separate steps. If saving the booking fails, the service releases the
+seats it just reserved before letting the failure propagate, so seats are never
+held by a booking that does not exist. With an in-memory map this is close to
+theoretical; against a real datastore it is the difference between a
+recoverable error and seats that can never be sold again.
+
 ## Assumptions
 
 - Flight creation and search are out of scope, so flights are seeded in memory
@@ -133,5 +140,3 @@ is sufficient — no distributed locking involved.
   branch on something other than the HTTP status and message text.
 - Cap `numberOfSeats` at a sane per-booking maximum, and reject unknown JSON
   properties instead of ignoring them.
-- Roll the seats back if persisting the booking fails after the reservation
-  succeeds — harmless with an in-memory map, not with a real datastore.

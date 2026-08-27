@@ -3,11 +3,13 @@ package com.example.flightticketbooking.exception;
 import com.example.flightticketbooking.dto.ErrorResponse;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -27,6 +29,9 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 public class ApiExceptionHandler {
 
     private static final Logger log = LoggerFactory.getLogger(ApiExceptionHandler.class);
+
+    /** Used only if the framework cannot report the supported methods. */
+    private static final HttpMethod[] DEFAULT_ALLOWED_METHODS = {HttpMethod.POST};
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ErrorResponse> handleValidationFailure(MethodArgumentNotValidException exception) {
@@ -62,9 +67,25 @@ public class ApiExceptionHandler {
         return build(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "Content-Type must be application/json");
     }
 
+    /**
+     * A 405 must tell the client which methods the resource does support
+     * (RFC 9110 section 15.5.6), so the {@code Allow} header is set from the
+     * methods the framework reports. That set is nullable, so it falls back to
+     * the only method this API exposes.
+     */
     @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
     public ResponseEntity<ErrorResponse> handleUnsupportedMethod(HttpRequestMethodNotSupportedException exception) {
-        return build(HttpStatus.METHOD_NOT_ALLOWED, "HTTP method not supported for this endpoint");
+        Set<HttpMethod> supportedMethods = exception.getSupportedHttpMethods();
+        HttpMethod[] allowedMethods = (supportedMethods == null || supportedMethods.isEmpty())
+                ? DEFAULT_ALLOWED_METHODS
+                : supportedMethods.toArray(new HttpMethod[0]);
+
+        return ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED)
+                .allow(allowedMethods)
+                .body(new ErrorResponse(
+                        HttpStatus.METHOD_NOT_ALLOWED.value(),
+                        HttpStatus.METHOD_NOT_ALLOWED.getReasonPhrase(),
+                        "HTTP method not supported for this endpoint"));
     }
 
     @ExceptionHandler(FlightNotFoundException.class)

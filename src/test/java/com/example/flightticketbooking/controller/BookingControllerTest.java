@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.params.provider.Arguments.arguments;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -19,6 +20,7 @@ import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -179,10 +181,13 @@ class BookingControllerTest {
     }
 
     @Test
-    void returns405ForUnsupportedMethod() throws Exception {
+    void returns405WithAllowHeaderForUnsupportedMethod() throws Exception {
         mockMvc.perform(get("/api/bookings"))
                 .andExpect(status().isMethodNotAllowed())
-                .andExpect(jsonPath("$.status").value(405));
+                .andExpect(header().exists(HttpHeaders.ALLOW))
+                .andExpect(header().string(HttpHeaders.ALLOW, Matchers.containsString("POST")))
+                .andExpect(jsonPath("$.status").value(405))
+                .andExpect(jsonPath("$.error").value("Method Not Allowed"));
     }
 
     @Test
