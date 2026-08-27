@@ -39,18 +39,59 @@ curl -i -X POST http://localhost:8080/api/bookings \
 }
 ```
 
-Error responses share one shape:
+## Errors
+
+Every failure — validation, unknown flight, full flight, or an unexpected one —
+comes back in the same shape:
 
 ```json
 { "status": 409, "error": "Conflict", "message": "Insufficient seats on flight AI303 for 3 seat(s)" }
 ```
 
+Validation failures add a `fieldErrors` map so a client can attach messages to
+the right input. `fieldErrors` is omitted from every other response.
+
+```json
+{
+  "status": 400,
+  "error": "Bad Request",
+  "message": "flightNumber must not be blank, numberOfSeats must be at least 1",
+  "fieldErrors": {
+    "flightNumber": "must not be blank",
+    "numberOfSeats": "must be at least 1"
+  }
+}
+```
+
+No response carries a stack trace, exception class, or parser message. An
+unexpected failure is logged server-side and returns a bare
+`{"status":500,"error":"Internal Server Error","message":"Unexpected error"}`.
+
 | Status | When |
 |--------|------|
 | 201 Created | booking confirmed |
-| 400 Bad Request | blank `flightNumber`, blank `passengerName`, `numberOfSeats` < 1, or malformed JSON |
+| 400 Bad Request | a field failed validation, or the body is missing / not valid JSON |
 | 404 Not Found | the flight number does not exist |
+| 405 Method Not Allowed | wrong HTTP method for the endpoint |
 | 409 Conflict | the flight does not have enough seats left |
+| 415 Unsupported Media Type | `Content-Type` is not `application/json` |
+| 500 Internal Server Error | anything unexpected — details are logged, not returned |
+
+### Validation rules
+
+| Field | Rule | Message |
+|-------|------|---------|
+| `flightNumber` | required, not null, not blank after trimming | `must not be blank` |
+| `passengerName` | required, not null, not blank after trimming | `must not be blank` |
+| `numberOfSeats` | required, not null | `is required` |
+| `numberOfSeats` | at least 1 | `must be at least 1` |
+
+Missing and `null` are treated the same as each other; `numberOfSeats` is an
+`Integer` rather than an `int` precisely so a missing value reports "is
+required" instead of silently defaulting to `0`. Strings are trimmed before
+validation, so `"   "` is rejected as blank and `" AI101 "` still books flight
+`AI101`. A non-numeric `numberOfSeats` is a malformed body, so it is a 400 too.
+All failing fields are reported in one response rather than one at a time.
 
 ## Design
 
@@ -73,7 +114,8 @@ is sufficient — no distributed locking involved.
 - A booking is all-or-nothing: a request for more seats than are left is
   rejected rather than partially filled.
 - No persistence — all state is lost on restart.
-- No authentication; the passenger name is taken at face value.
+- No authentication; the passenger name is taken at face value beyond being
+  non-blank — no length limit or character rules are imposed.
 - `bookingId` is a server-generated UUID; the client does not supply one.
 - Requests are not idempotent — a retried request creates a second booking.
 
@@ -87,7 +129,9 @@ is sufficient — no distributed locking involved.
   seats.
 - Make booking idempotent with a client-supplied idempotency key, so a retry
   after a timeout cannot double-book.
-- Return field-level validation errors as a structured map instead of one
-  joined message.
+- Add an error code per failure type (e.g. `INSUFFICIENT_SEATS`) so clients can
+  branch on something other than the HTTP status and message text.
+- Cap `numberOfSeats` at a sane per-booking maximum, and reject unknown JSON
+  properties instead of ignoring them.
 - Roll the seats back if persisting the booking fails after the reservation
   succeeds — harmless with an in-memory map, not with a real datastore.
