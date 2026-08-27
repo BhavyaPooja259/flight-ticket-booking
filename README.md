@@ -1,0 +1,93 @@
+# Flight Ticket Booking API
+
+A small Spring Boot service that books seats on pre-populated flights.
+
+## How to run
+
+Requires Java 17+.
+
+```bash
+./mvnw spring-boot:run          # starts on http://localhost:8080
+./mvnw test                     # run the tests
+./mvnw clean package            # build the jar
+```
+
+Flights are loaded into memory at startup (`FlightDataInitializer`):
+
+| Flight number | Capacity |
+|---------------|----------|
+| AI101         | 150      |
+| AI202         | 60       |
+| AI303         | 2        |
+
+## Example request / response
+
+```bash
+curl -i -X POST http://localhost:8080/api/bookings \
+  -H 'Content-Type: application/json' \
+  -d '{"flightNumber":"AI101","passengerName":"Ada Lovelace","numberOfSeats":2}'
+```
+
+`201 Created`
+
+```json
+{
+  "bookingId": "0f1b0c9b-6a26-4f0e-9e1a-2b0f3a7c8d11",
+  "flightNumber": "AI101",
+  "passengerName": "Ada Lovelace",
+  "numberOfSeats": 2
+}
+```
+
+Error responses share one shape:
+
+```json
+{ "status": 409, "error": "Conflict", "message": "Insufficient seats on flight AI303 for 3 seat(s)" }
+```
+
+| Status | When |
+|--------|------|
+| 201 Created | booking confirmed |
+| 400 Bad Request | blank `flightNumber`, blank `passengerName`, `numberOfSeats` < 1, or malformed JSON |
+| 404 Not Found | the flight number does not exist |
+| 409 Conflict | the flight does not have enough seats left |
+
+## Design
+
+`BookingController` -> `BookingService` -> `FlightRepository` / `BookingRepository`,
+with both repositories backed by a `ConcurrentHashMap`.
+
+**Preventing overbooking.** The availability check and the seat decrement live
+together in `Flight.reserveSeats(int)`, which is `synchronized` on the flight
+instance. Every request for a flight number resolves to the same `Flight`
+object in the repository, so concurrent bookings for one flight serialise on
+that object's monitor while bookings for different flights stay independent.
+The service never reads availability and then writes it back, so there is no
+window for a lost update. The app is a single instance, so this in-process lock
+is sufficient — no distributed locking involved.
+
+## Assumptions
+
+- Flight creation and search are out of scope, so flights are seeded in memory
+  and never change capacity.
+- A booking is all-or-nothing: a request for more seats than are left is
+  rejected rather than partially filled.
+- No persistence — all state is lost on restart.
+- No authentication; the passenger name is taken at face value.
+- `bookingId` is a server-generated UUID; the client does not supply one.
+- Requests are not idempotent — a retried request creates a second booking.
+
+## What I would improve with more time
+
+- Persist flights and bookings, and move the concurrency guard to the database
+  (an optimistic-locking version column or a conditional `UPDATE ... WHERE
+  available_seats >= ?`), which is what makes this correct across more than one
+  instance.
+- Add the rest of the lifecycle: retrieve a booking, cancel one and release its
+  seats.
+- Make booking idempotent with a client-supplied idempotency key, so a retry
+  after a timeout cannot double-book.
+- Return field-level validation errors as a structured map instead of one
+  joined message.
+- Roll the seats back if persisting the booking fails after the reservation
+  succeeds — harmless with an in-memory map, not with a real datastore.
